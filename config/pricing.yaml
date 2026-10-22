@@ -1,0 +1,18 @@
+# USD per million tokens, used to report cost per task in evals.
+# Prices change. Check each provider's pricing page and fill these in before
+# publishing numbers. A model with null prices reports tokens but cost "n/a".
+mock:
+  input_per_mtok: 0
+  output_per_mtok: 0
+claude-sonnet-5-5:
+  input_per_mtok: null
+  output_per_mtok: null
+claude-haiku-5-5:
+  input_per_mtok: null
+  output_per_mtok: null
+gemini-2.5-flash:
+  input_per_mtok: null
+  output_per_mtok: null
+gpt-4.1-mini:
+  input_per_mtok: null
+  output_per_mtok: null
