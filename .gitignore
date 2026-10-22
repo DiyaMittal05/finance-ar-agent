@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+/data/
+# Mock runs are pipeline checks, not results worth committing. Real model runs are committed.
+evals/results/mock_*.json
+.DS_Store
