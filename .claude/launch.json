@@ -1,7 +1,0 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    {"name": "ar-assistant", "runtimeExecutable": ".venv/bin/python",
-     "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8000"], "port": 8000}
-  ]
-}
