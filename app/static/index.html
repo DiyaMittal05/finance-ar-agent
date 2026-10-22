@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AR Assistant</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #1f5f8b; --ok: #2e7d4f; --warn: #a86b00; --bad: #b3261e; --code: #f1f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --text: #ecebe6; --muted: #9c9b95; --line: #33332f;
+            --accent: #6fb0dd; --ok: #6cc28f; --warn: #e0a84a; --bad: #ef7a72; --code: #272725; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  textarea { width: 100%; min-height: 72px; resize: vertical; font: inherit; padding: 10px; border-radius: 8px;
+             border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  button, select { font: inherit; border-radius: 8px; border: 1px solid var(--line); padding: 7px 12px;
+                   background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .6; cursor: wait; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+           text-transform: uppercase; letter-spacing: .03em; border: 1px solid currentColor; }
+  .answered { color: var(--ok); } .clarify { color: var(--warn); } .refused, .error { color: var(--bad); }
+  pre { white-space: pre-wrap; word-wrap: break-word; background: var(--code); padding: 12px; border-radius: 8px;
+        margin: 8px 0 0; font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AR Assistant</h1>
+  <p class="sub" id="cfg">Multi-agent accounts receivable assistant over a synthetic ERP.</p>
+
+  <div class="panel">
+    <textarea id="q" placeholder="Ask about invoices, balances, aging or collections…">Which invoices from Acme are overdue and what should we say to them?</textarea>
+    <div class="row">
+      <button class="primary" id="go">Ask</button>
+      <label class="meta">Prompt version <select id="ver"></select></label>
+      <span class="meta" id="busy"></span>
+    </div>
+    <div class="chips" id="examples"></div>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="panel">
+    <h2>Eval results</h2>
+    <div class="scroll" id="evals"><span class="meta">Loading…</span></div>
+  </div>
+</main>
+<script>
+const EXAMPLES = [
+  "Which invoices from Acme are overdue and what should we say to them?",
+  "Draft a follow-up email to Acme Corporation about their overdue invoices.",
+  "Is there anything unusual about Globex Ltd's invoices?",
+  "Draft a follow-up email to Initech about their overdue invoices.",
+  "Which customers have invoices more than 90 days overdue?",
+  "What are our standard late fee terms?",
+  "Write me a poem about the ocean.",
+];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pct = (x) => x == null ? "–" : Math.round(x * 100) + "%";
+
+for (const ex of EXAMPLES) {
+  const b = document.createElement("button");
+  b.className = "chip"; b.textContent = ex;
+  b.onclick = () => { $("q").value = ex; ask(); };
+  $("examples").appendChild(b);
+}
+
+fetch("/api/config").then(r => r.json()).then(c => {
+  $("cfg").textContent = `Model: ${c.provider}/${c.model} · Data as of ${c.as_of_date} · All data is synthetic.`;
+  for (const v of c.prompt_versions) {
+    const o = document.createElement("option"); o.value = o.textContent = v;
+    if (v === c.default_prompt_version) o.selected = true;
+    $("ver").appendChild(o);
+  }
+});
+
+async function ask() {
+  const query = $("q").value.trim();
+  if (!query) return;
+  $("go").disabled = true; $("busy").textContent = "Planning, researching, analysing, drafting…";
+  try {
+    const r = await fetch("/api/ask", { method: "POST", headers: { "content-type": "application/json" },
+                                        body: JSON.stringify({ query, prompt_version: $("ver").value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    render(d);
+  } catch (e) {
+    $("out").innerHTML = `<div class="panel"><span class="badge error">error</span><pre>${esc(e.message)}</pre></div>`;
+  } finally {
+    $("go").disabled = false; $("busy").textContent = "";
+  }
+}
+$("go").onclick = ask;
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask(); });
+
+function render(d) {
+  const u = d.usage || {};
+  let html = `<div class="panel"><span class="badge ${esc(d.status)}">${esc(d.status)}</span>
+    <span class="meta">&nbsp; ${d.latency_s}s · ${u.llm_calls} LLM calls · ${u.input_tokens + u.output_tokens} tokens
+    · ${esc(d.provider)}/${esc(d.model)} · prompt ${esc(d.prompt_version)}</span>
+    <pre>${esc(d.answer)}</pre></div>`;
+  if (d.email) {
+    html += `<div class="panel"><h2>Draft email</h2><div class="meta">To: ${esc(d.email.to)}<br>Subject: ${esc(d.email.subject)}</div>
+      <pre>${esc(d.email.body)}</pre></div>`;
+  }
+  if (d.citations && d.citations.length) {
+    html += `<div class="panel"><h2>Policy citations</h2><div class="meta">${d.citations.map(esc).join("<br>")}</div></div>`;
+  }
+  const steps = (d.trace || []).map(s => `<tr><td>${esc(s.agent)}</td><td>${s.latency_s}s</td>
+     <td>${s.input_tokens}/${s.output_tokens}</td><td><details><summary>output</summary><pre>${esc(JSON.stringify(s.output, null, 1))}</pre></details></td></tr>`).join("");
+  const tools = (d.evidence || []).map(e => `${esc(e.tool)}(${esc(JSON.stringify(e.args))})`).join("<br>");
+  html += `<div class="panel"><h2>Agent trace</h2><div class="scroll"><table><tr><th>Agent</th><th>Latency</th><th>Tokens in/out</th><th></th></tr>${steps}</table></div>
+    <h2 style="margin-top:12px">Tool calls</h2><div class="meta">${tools || "none"}</div></div>`;
+  $("out").innerHTML = html;
+}
+
+fetch("/api/evals").then(r => r.json()).then(rows => {
+  if (!rows.length) { $("evals").innerHTML = '<span class="meta">No eval runs found. Run <code>python -m evals.run</code>.</span>'; return; }
+  const body = rows.map(r => { const s = r.summary; return `<tr><td>${esc(r.provider)}/${esc(r.model)}</td><td>${esc(r.prompt_version)}</td>
+    <td>${s.cases}</td><td>${pct(s.task_success)}</td><td>${pct(s.hallucination_rate)}</td><td>${pct(s.refusal_accuracy)}</td>
+    <td>${s.latency_p50_s}s / ${s.latency_p95_s}s</td><td>${s.cost_per_task_usd == null ? "–" : "$" + s.cost_per_task_usd.toFixed(4)}</td></tr>`; }).join("");
+  $("evals").innerHTML = `<table><tr><th>Model</th><th>Prompt</th><th>Cases</th><th>Task success</th><th>Hallucination</th>
+    <th>Refusal acc.</th><th>p50 / p95</th><th>Cost/task</th></tr>${body}</table>
+    <p class="meta">Mock rows test the pipeline only; they are not model results.</p>`;
+});
+</script>
+</body>
+</html>
